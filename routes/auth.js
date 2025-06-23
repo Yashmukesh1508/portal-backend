@@ -1,8 +1,69 @@
+// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const Counter = require('../models/Counter');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
+// Function to get the next sequence value
+async function getNextSequence(name) {
+  const counter = await Counter.findOneAndUpdate(
+    { id: name },
+    { $inc: { sequence_value: 1 } },
+    { new: true, upsert: true }
+  );
+  return counter.sequence_value;
+}
+
+// Register API
+router.post('/register', async (req, res) => {
+  const {
+    slug, name, firm_name, mobile, email, password,
+    address, state, city, pincode, aadhar_number,
+    pan_number, gst_number, reference
+  } = req.body;
+
+  if (!mobile || !password || !email || !name) {
+    return res.status(400).json({ message: 'Required fields missing' });
+  }
+
+  try {
+    const existingUser = await User.findOne({ mobile });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+
+    const userId = await getNextSequence('userId');
+
+    const newUser = new User({
+      userId,
+      slug,
+      name,
+      firm_name,
+      mobile,
+      email,
+      password,
+      address,
+      state,
+      city,
+      pincode,
+      aadhar_number,
+      pan_number,
+      gst_number,
+      reference
+    });
+
+    await newUser.save();
+
+    res.status(201).json({ message: 'User registered successfully', userId: newUser.userId });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Login API
 router.post('/login', async (req, res) => {
   const { mobile, password } = req.body;
 
@@ -21,9 +82,30 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Login success — you can send user data or JWT token here
-    res.json({ message: 'Login successful', user: { name: user.name, mobile: user.mobile, email: user.email } });
+    // ✅ Create JWT token with userId and mongoId
+    const token = jwt.sign(
+      {
+        userId: user.userId,
+        mongoId: user._id,
+        mobile: user.mobile,
+        email: user.email
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
 
+    res.json({
+      message: 'Login successful',
+      user: {
+        userId: user.userId,
+        mongoId: user._id,
+        name: user.name,
+        mobile: user.mobile,
+        email: user.email,
+        slug: user.slug
+      },
+      token
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });

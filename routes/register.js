@@ -1,7 +1,9 @@
 const express = require("express");
 const router = express.Router();
-const Registration = require("../models/registrationModel"); // or your model
+const bcrypt = require("bcryptjs");
+const Registration = require("../models/registrationModel");
 
+// Registration Route
 router.post("/register", async (req, res) => {
   try {
     const {
@@ -21,22 +23,28 @@ router.post("/register", async (req, res) => {
       reference,
     } = req.body;
 
-    // You can add validation here (e.g. check required fields)
+    // ✅ Validation
+    if (!name || !mobile || !password) {
+      return res.status(400).json({ error: "Name, Mobile, and Password are required" });
+    }
 
-    // Check if user already exists (optional)
+    // ✅ Check if user already exists
     const existingUser = await Registration.findOne({ mobile });
     if (existingUser) {
       return res.status(400).json({ error: "User with this mobile already exists" });
     }
 
-    // Save new user to DB
+    // ✅ Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // ✅ Create new user
     const newUser = new Registration({
       slug,
       name,
       firm_name,
       mobile,
       email,
-      password, // Ideally hash password here
+      password: hashedPassword,
       address,
       state,
       city,
@@ -55,29 +63,5 @@ router.post("/register", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
-const bcrypt = require("bcryptjs");
-
-router.post('/register', async (req, res) => {
-  try {
-    const { password, ...otherFields } = req.body;
-
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create new user object with hashed password
-    const newUser = new Registration({
-      ...otherFields,
-      password: hashedPassword,
-    });
-
-    await newUser.save();
-
-    res.status(201).json({ message: "User registered successfully" });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to register" });
-  }
-});
-
 
 module.exports = router;

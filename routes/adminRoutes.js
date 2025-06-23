@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const Registration = require('../models/User'); // update with your actual model path
+const Registration = require('../models/User'); // user model
 
 router.post("/login", async (req, res) => {
   const { mobile, password } = req.body;
@@ -13,12 +13,15 @@ router.post("/login", async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // ✅ Add password match check here if not already done
-    if (user.password !== password) {
+    // ✅ Compare hashed password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // ✅ Return user details
+    // ✅ If using JWT, you can generate a token here (optional)
+    // const token = jwt.sign({ id: user._id }, 'your_jwt_secret', { expiresIn: '1h' });
+
     return res.status(200).json({
       message: "Login successful",
       user: {
@@ -27,12 +30,12 @@ router.post("/login", async (req, res) => {
         mobile: user.mobile,
         id: user._id,
       },
-      token: "your_token_here", // Optional: if using token
+      // token, // Uncomment if using JWT
     });
+
   } catch (err) {
     return res.status(500).json({ message: "Server error", error: err });
   }
 });
-
 
 module.exports = router;
