@@ -1,4 +1,3 @@
-// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -14,7 +13,7 @@ const FTP_CONFIG = {
   host: 'ftp.swaippay.com',
   user: 'u612373529.portal',
   password: 'Yash1508%',
-  secure: false // SSL disabled as requested
+  secure: false // ⚠️ SSL disabled
 };
 
 const PUBLIC_UPLOAD_URL = 'https://swaippay.com/uploads/';
@@ -98,7 +97,7 @@ router.post(
 
       if (aadharLocal) {
         aadharURL = await uploadToFTP(aadharLocal.path, aadharLocal.filename);
-        fs.unlinkSync(aadharLocal.path);
+        fs.unlinkSync(aadharLocal.path); // Delete local file
       }
 
       if (panLocal) {
