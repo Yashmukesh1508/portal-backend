@@ -2,18 +2,29 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const ftp = require('basic-ftp');
+const fs = require('fs');
 const path = require('path');
 const User = require('../models/User');
 const Counter = require('../models/Counter');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
+const FTP_CONFIG = {
+  host: 'ftp.swaippay.com',
+  user: 'u612373529.portal',
+  password: 'Yash1508%',
+  secure: true // set to true if using FTPS
+};
+
+const PUBLIC_UPLOAD_URL = 'https://swaippay.com/uploads/';
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/');
+    cb(null, 'uploads/'); // Temp local storage
   },
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     cb(null, `${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`);
   }
 });
@@ -30,6 +41,20 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter });
 
+async function uploadToFTP(localPath, remoteFilename) {
+  const client = new ftp.Client();
+  try {
+    await client.access(FTP_CONFIG);
+    await client.ensureDir('uploads');
+    await client.uploadFrom(localPath, `uploads/${remoteFilename}`);
+    client.close();
+    return `${PUBLIC_UPLOAD_URL}${remoteFilename}`;
+  } catch (err) {
+    client.close();
+    throw err;
+  }
+}
+
 async function getNextSequence(name) {
   const counter = await Counter.findOneAndUpdate(
     { id: name },
@@ -40,60 +65,77 @@ async function getNextSequence(name) {
 }
 
 // Register API
-router.post('/register', upload.fields([
-  { name: 'aadhar_file', maxCount: 1 },
-  { name: 'pan_file', maxCount: 1 }
-]), async (req, res) => {
-  const {
-    slug, name, firm_name, mobile, email, password,
-    address, state, city, pincode, aadhar_number,
-    pan_number, reference
-  } = req.body;
+router.post(
+  '/register',
+  upload.fields([
+    { name: 'aadhar_file', maxCount: 1 },
+    { name: 'pan_file', maxCount: 1 }
+  ]),
+  async (req, res) => {
+    const {
+      slug, name, firm_name, mobile, email, password,
+      address, state, city, pincode, aadhar_number,
+      pan_number, reference
+    } = req.body;
 
-  if (!mobile || !password || !email || !name) {
-    return res.status(400).json({ message: 'Required fields missing' });
-  }
-
-  try {
-    const existingUser = await User.findOne({ mobile });
-    if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' });
+    if (!mobile || !password || !email || !name) {
+      return res.status(400).json({ message: 'Required fields missing' });
     }
 
-    const userId = await getNextSequence('userId');
+    try {
+      const existingUser = await User.findOne({ mobile });
+      if (existingUser) {
+        return res.status(400).json({ message: 'User already exists' });
+      }
 
-      const aadharFile = req.files['aadhar_file']?.[0]?.filename || '';
-    const panFile = req.files['pan_file']?.[0]?.filename || '';
+      const userId = await getNextSequence('userId');
 
-    const newUser = new User({
-      userId,
-      slug,
-      name,
-      firm_name,
-      mobile,
-      email,
-      password,
-      address,
-      state,
-      city,
-      pincode,
-      aadhar_number,
-      pan_number,
-      reference,
-      aadhar_file: aadharFile,
-      pan_file: panFile
-    });
+      const aadharLocal = req.files['aadhar_file']?.[0];
+      const panLocal = req.files['pan_file']?.[0];
 
-    await newUser.save();
+      let aadharURL = '';
+      let panURL = '';
 
-    res.status(201).json({ message: 'User registered successfully', userId: newUser.userId });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
+      if (aadharLocal) {
+        aadharURL = await uploadToFTP(aadharLocal.path, aadharLocal.filename);
+        fs.unlinkSync(aadharLocal.path); // Delete temp file
+      }
+
+      if (panLocal) {
+        panURL = await uploadToFTP(panLocal.path, panLocal.filename);
+        fs.unlinkSync(panLocal.path); // Delete temp file
+      }
+
+      const newUser = new User({
+        userId,
+        slug,
+        name,
+        firm_name,
+        mobile,
+        email,
+        password,
+        address,
+        state,
+        city,
+        pincode,
+        aadhar_number,
+        pan_number,
+        reference,
+        aadhar_file: aadharURL,
+        pan_file: panURL
+      });
+
+      await newUser.save();
+
+      res.status(201).json({ message: 'User registered successfully', userId: newUser.userId });
+    } catch (error) {
+      console.error('Registration Error:', error);
+      res.status(500).json({ message: 'Server error' });
+    }
   }
-});
+);
 
-// Login API
+// Login API (unchanged)
 router.post('/login', async (req, res) => {
   const { mobile, password } = req.body;
 
@@ -112,7 +154,6 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // ✅ Create JWT token with userId and mongoId
     const token = jwt.sign(
       {
         userId: user.userId,
