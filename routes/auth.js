@@ -14,22 +14,14 @@ const FTP_CONFIG = {
   host: 'ftp.swaippay.com',
   user: 'u612373529.portal',
   password: 'Yash1508%',
-  secure: false // set to true if using FTPS
+  secure: false // SSL disabled as requested
 };
-await client.access({
-  host: 'ftp.swaippay.com',
-  user: 'u612373529.portal',
-  password: 'Yash1508%',
-  secure: true,
-  secureOptions: { rejectUnauthorized: false }
-});
-
 
 const PUBLIC_UPLOAD_URL = 'https://swaippay.com/uploads/';
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/'); // Temp local storage
+    cb(null, 'uploads/'); // Temporary local storage
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
@@ -106,12 +98,12 @@ router.post(
 
       if (aadharLocal) {
         aadharURL = await uploadToFTP(aadharLocal.path, aadharLocal.filename);
-        fs.unlinkSync(aadharLocal.path); // Delete temp file
+        fs.unlinkSync(aadharLocal.path);
       }
 
       if (panLocal) {
         panURL = await uploadToFTP(panLocal.path, panLocal.filename);
-        fs.unlinkSync(panLocal.path); // Delete temp file
+        fs.unlinkSync(panLocal.path);
       }
 
       const newUser = new User({
@@ -143,7 +135,7 @@ router.post(
   }
 );
 
-// Login API (unchanged)
+// Login API
 router.post('/login', async (req, res) => {
   const { mobile, password } = req.body;
 
