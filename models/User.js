@@ -13,8 +13,8 @@ const UserSchema = new mongoose.Schema({
   state: String,
   city: String,
   pincode: String,
-  aadhar_number: String,
-  pan_number: String,
+  aadhar_file: { type: String },
+  pan_file: { type: String },
   gst_number: String,
   reference: String
 });

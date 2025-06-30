@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
+
 mongoose.set('strictQuery', false);
 
 const app = express();
@@ -48,3 +49,5 @@ process.on('SIGINT', async () => {
   console.log('MongoDB disconnected on app termination');
   process.exit(0);
 });
+
+app.use('/uploads', express.static('uploads'));

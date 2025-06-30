@@ -19,7 +19,6 @@ router.post("/register", async (req, res) => {
       pincode,
       aadhar_number,
       pan_number,
-      gst_number,
       reference,
     } = req.body;
 
@@ -51,7 +50,6 @@ router.post("/register", async (req, res) => {
       pincode,
       aadhar_number,
       pan_number,
-      gst_number,
       reference,
     });
 
