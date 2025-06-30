@@ -1,23 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const ftp = require('basic-ftp');
 const fs = require('fs');
 const path = require('path');
 const User = require('../models/User');
 const Counter = require('../models/Counter');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const cloudinary = require('cloudinary').v2;
 
-const FTP_CONFIG = {
-  host: 'ftp.swaippay.com',
-  user: 'u612373529.portal',
-  password: 'Yash1508%',
-  secure: false // ⚠️ SSL disabled
-};
+// ✅ Cloudinary Config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME, // e.g. 'your-cloud-name'
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-const PUBLIC_UPLOAD_URL = 'https://swaippay.com/uploads/';
-
+// 📂 Multer Setup (local temp upload)
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'uploads/'); // Temporary local storage
@@ -40,17 +39,18 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter });
 
-async function uploadToFTP(localPath, remoteFilename) {
-  const client = new ftp.Client();
+// 🔼 Upload file to Cloudinary
+async function uploadToCloudinary(localPath, folder) {
   try {
-    await client.access(FTP_CONFIG);
-    await client.ensureDir('uploads');
-    await client.uploadFrom(localPath, `uploads/${remoteFilename}`);
-    client.close();
-    return `${PUBLIC_UPLOAD_URL}${remoteFilename}`;
-  } catch (err) {
-    client.close();
-    throw err;
+    const result = await cloudinary.uploader.upload(localPath, {
+      folder: folder,
+      resource_type: 'auto'
+    });
+    fs.unlinkSync(localPath); // Delete local file
+    return result.secure_url;
+  } catch (error) {
+    console.error('Cloudinary upload error:', error);
+    throw error;
   }
 }
 
@@ -63,7 +63,7 @@ async function getNextSequence(name) {
   return counter.sequence_value;
 }
 
-// Register API
+// ✅ Register API
 router.post(
   '/register',
   upload.fields([
@@ -96,13 +96,11 @@ router.post(
       let panURL = '';
 
       if (aadharLocal) {
-        aadharURL = await uploadToFTP(aadharLocal.path, aadharLocal.filename);
-        fs.unlinkSync(aadharLocal.path); // Delete local file
+        aadharURL = await uploadToCloudinary(aadharLocal.path, 'documents/aadhar');
       }
 
       if (panLocal) {
-        panURL = await uploadToFTP(panLocal.path, panLocal.filename);
-        fs.unlinkSync(panLocal.path);
+        panURL = await uploadToCloudinary(panLocal.path, 'documents/pan');
       }
 
       const newUser = new User({
@@ -134,7 +132,7 @@ router.post(
   }
 );
 
-// Login API
+// ✅ Login API
 router.post('/login', async (req, res) => {
   const { mobile, password } = req.body;
 
