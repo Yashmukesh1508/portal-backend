@@ -1,30 +1,20 @@
-// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const ftp = require('basic-ftp');
-const fs = require('fs');
 const path = require('path');
-const User = require('../models/User');
-const Counter = require('../models/Counter');
+const fs = require('fs');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const ftp = require('basic-ftp');
+const User = require('../models/User');
+const Counter = require('../models/Counter');
+require('dotenv').config();
 
-const FTP_CONFIG = {
-  host: 'ftp.swaippay.com',
-  user: 'u612373529.portal',
-  password: 'Yash1508%',
-  secure: true // set to true if using FTPS
-};
-
-const PUBLIC_UPLOAD_URL = 'https://swaippay.com/uploads/';
-
+// Multer config
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/'); // Temp local storage
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, `${file.fieldname}-${uniqueSuffix}${path.extname(file.originalname)}`);
   }
 });
@@ -32,29 +22,12 @@ const storage = multer.diskStorage({
 const fileFilter = (req, file, cb) => {
   const allowedTypes = /jpeg|jpg|png|pdf/;
   const ext = path.extname(file.originalname).toLowerCase();
-  if (allowedTypes.test(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only JPG, PNG, or PDF files are allowed'));
-  }
+  allowedTypes.test(ext) ? cb(null, true) : cb(new Error('Only JPG, PNG, or PDF files allowed'));
 };
 
 const upload = multer({ storage, fileFilter });
 
-async function uploadToFTP(localPath, remoteFilename) {
-  const client = new ftp.Client();
-  try {
-    await client.access(FTP_CONFIG);
-    await client.ensureDir('uploads');
-    await client.uploadFrom(localPath, `uploads/${remoteFilename}`);
-    client.close();
-    return `${PUBLIC_UPLOAD_URL}${remoteFilename}`;
-  } catch (err) {
-    client.close();
-    throw err;
-  }
-}
-
+// Get next userId
 async function getNextSequence(name) {
   const counter = await Counter.findOneAndUpdate(
     { id: name },
@@ -64,122 +37,95 @@ async function getNextSequence(name) {
   return counter.sequence_value;
 }
 
-// Register API
-router.post(
-  '/register',
-  upload.fields([
-    { name: 'aadhar_file', maxCount: 1 },
-    { name: 'pan_file', maxCount: 1 }
-  ]),
-  async (req, res) => {
-    const {
-      slug, name, firm_name, mobile, email, password,
-      address, state, city, pincode, aadhar_number,
-      pan_number, reference
-    } = req.body;
+// FTP Upload function
+async function uploadToFTP(localPath, remoteFilename) {
+  const client = new ftp.Client();
+  client.ftp.verbose = false;
+  try {
+    await client.access({
+      host: process.env.FTP_HOST,
+      user: process.env.FTP_USER,
+      password: process.env.FTP_PASS,
+      secure: true,
+      secureOptions: {
+        rejectUnauthorized: false // to allow self-signed or mismatched SSL
+      }
+    });
+    await client.ensureDir("/public_html/uploads");
+    await client.uploadFrom(localPath, remoteFilename);
+    console.log(`✅ FTP Upload successful: ${remoteFilename}`);
+  } catch (err) {
+    console.error("FTP Upload Error:", err.message);
+    throw err;
+  } finally {
+    client.close();
+  }
+}
 
+// Register Route
+router.post('/register', upload.fields([
+  { name: 'aadhar_file', maxCount: 1 },
+  { name: 'pan_file', maxCount: 1 }
+]), async (req, res) => {
+  const {
+    slug, name, firm_name, mobile, email, password,
+    address, state, city, pincode, aadhar_number,
+    pan_number, reference
+  } = req.body;
+
+  try {
     if (!mobile || !password || !email || !name) {
       return res.status(400).json({ message: 'Required fields missing' });
     }
 
-    try {
-      const existingUser = await User.findOne({ mobile });
-      if (existingUser) {
-        return res.status(400).json({ message: 'User already exists' });
-      }
+    const existingUser = await User.findOne({ mobile });
+    if (existingUser) return res.status(400).json({ message: 'User already exists' });
 
-      const userId = await getNextSequence('userId');
+    const userId = await getNextSequence('userId');
 
-      const aadharLocal = req.files['aadhar_file']?.[0];
-      const panLocal = req.files['pan_file']?.[0];
+    const aadharFile = req.files['aadhar_file']?.[0];
+    const panFile = req.files['pan_file']?.[0];
 
-      let aadharURL = '';
-      let panURL = '';
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-      if (aadharLocal) {
-        aadharURL = await uploadToFTP(aadharLocal.path, aadharLocal.filename);
-        fs.unlinkSync(aadharLocal.path); // Delete temp file
-      }
-
-      if (panLocal) {
-        panURL = await uploadToFTP(panLocal.path, panLocal.filename);
-        fs.unlinkSync(panLocal.path); // Delete temp file
-      }
-
-      const newUser = new User({
-        userId,
-        slug,
-        name,
-        firm_name,
-        mobile,
-        email,
-        password,
-        address,
-        state,
-        city,
-        pincode,
-        aadhar_number,
-        pan_number,
-        reference,
-        aadhar_file: aadharURL,
-        pan_file: panURL
-      });
-
-      await newUser.save();
-
-      res.status(201).json({ message: 'User registered successfully', userId: newUser.userId });
-    } catch (error) {
-      console.error('Registration Error:', error);
-      res.status(500).json({ message: 'Server error' });
-    }
-  }
-);
-
-// Login API (unchanged)
-router.post('/login', async (req, res) => {
-  const { mobile, password } = req.body;
-
-  if (!mobile || !password) {
-    return res.status(400).json({ message: 'Mobile and password are required' });
-  }
-
-  try {
-    const user = await User.findOne({ mobile });
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user.userId,
-        mongoId: user._id,
-        mobile: user.mobile,
-        email: user.email
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-
-    res.json({
-      message: 'Login successful',
-      user: {
-        userId: user.userId,
-        mongoId: user._id,
-        name: user.name,
-        mobile: user.mobile,
-        email: user.email,
-        slug: user.slug
-      },
-      token
+    const newUser = new User({
+      userId,
+      slug,
+      name,
+      firm_name,
+      mobile,
+      email,
+      password: hashedPassword,
+      address,
+      state,
+      city,
+      pincode,
+      aadhar_number,
+      pan_number,
+      reference,
+      aadhar_file: aadharFile?.filename || '',
+      pan_file: panFile?.filename || ''
     });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
+
+    await newUser.save();
+
+    // Upload to FTP
+    if (aadharFile) {
+      await uploadToFTP(aadharFile.path, aadharFile.filename);
+    }
+    if (panFile) {
+      await uploadToFTP(panFile.path, panFile.filename);
+    }
+
+    // Delete local files
+    if (aadharFile) fs.unlinkSync(aadharFile.path);
+    if (panFile) fs.unlinkSync(panFile.path);
+
+    res.status(201).json({ message: 'Registration successful', userId });
+
+  } catch (err) {
+    console.error("Registration Error:", err.message);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
